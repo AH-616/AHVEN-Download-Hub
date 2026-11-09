@@ -1,0 +1,44 @@
+name: Unpack project ZIP
+
+# Phone-friendly: upload the project .zip to the repository root, then run this workflow once
+# (Actions > Unpack project ZIP > Run workflow). It replaces the project files with the ZIP's contents,
+# keeps .github/ and the history, and removes the zip. Then run "Build AHD Hub APK".
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Replace project files with the ZIP contents
+        shell: bash
+        run: |
+          set -e
+          zip_file="$(ls -1 *.zip 2>/dev/null | head -n 1 || true)"
+          if [ -z "$zip_file" ]; then echo "::error::No .zip file in the repository root."; exit 1; fi
+          mkdir -p "$RUNNER_TEMP/x"
+          unzip -q -o "$zip_file" -d "$RUNNER_TEMP/x"
+          found="$(find "$RUNNER_TEMP/x" -maxdepth 3 -name settings.gradle.kts | head -n 1)"
+          if [ -z "$found" ]; then echo "::error::settings.gradle.kts not found inside $zip_file"; exit 1; fi
+          src="$(dirname "$found")"
+          # Workflow files can't be changed by this job: keep the repository's own .github folder.
+          rm -rf "$src/.github"
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github ! -name "$zip_file" -exec rm -rf {} +
+          cp -a "$src"/. .
+          rm -f "$zip_file"
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Nothing changed."; exit 0; fi
+          git commit -m "Update source"
+          git push
