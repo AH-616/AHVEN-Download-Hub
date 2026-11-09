@@ -1,0 +1,156 @@
+name: Build AHD Hub APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+env:
+  # Gradle reads these: the build number becomes versionCode (1.<n>), UPDATE_REPO is where the app looks for updates.
+  # Public source repo: releases and update checks use this same repository (no extra token needed).
+  BUILD_NUMBER: ${{ github.run_number }}
+  UPDATE_REPO: ${{ vars.UPDATE_REPO || github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Normal case: the project files are in the repository root.
+      # Phone-friendly case: only a project .zip was uploaded -> unzip it and build that.
+      - name: Locate project
+        id: locate
+        shell: bash
+        run: |
+          set -e
+          if [ -f settings.gradle.kts ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          else
+            zip_file="$(ls -1 *.zip 2>/dev/null | head -n 1 || true)"
+            if [ -z "$zip_file" ]; then
+              echo "::error::No settings.gradle.kts in the repository root and no .zip file found. Upload the project files (or the project ZIP) to the repository root."
+              exit 1
+            fi
+            mkdir -p _project
+            unzip -q -o "$zip_file" -d _project
+            found="$(find _project -maxdepth 3 -name settings.gradle.kts | head -n 1)"
+            if [ -z "$found" ]; then
+              echo "::error::settings.gradle.kts was not found inside $zip_file"
+              exit 1
+            fi
+            echo "dir=$(dirname "$found")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle wrapper executable
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: chmod +x ./gradlew
+
+      # Optional: sign with your own key. Add 4 repository Secrets (Settings > Secrets and variables > Actions):
+      # KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD. Without them the debug key is used.
+      - name: Prepare signing key (if Secrets exist)
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KS_KEYPASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ] && [ -n "$KS_ALIAS" ]; then
+            echo "$KS_B64" | tr -d '\n\r ' | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SIGN_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGN_STORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+            echo "SIGN_KEY_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
+            echo "SIGN_KEY_PASSWORD=${KS_KEYPASS:-$KS_PASS}" >> "$GITHUB_ENV"
+            echo "Signing with your own key."
+          else
+            echo "No signing Secrets found - using the built-in debug key."
+          fi
+
+      - name: Run unit tests
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: ./gradlew --no-daemon testDebugUnitTest --stacktrace
+
+      # Repository variable USE_R8 = true (Settings > Secrets and variables > Actions > Variables) builds the
+      # shrunk + obfuscated release APK. Anything else builds the plain debug APK.
+      - name: Build APKs
+        working-directory: ${{ steps.locate.outputs.dir }}
+        shell: bash
+        run: |
+          if [ "${{ vars.USE_R8 }}" = "true" ]; then
+            ./gradlew --no-daemon assembleRelease --stacktrace
+            echo "VARIANT=release" >> "$GITHUB_ENV"
+          else
+            ./gradlew --no-daemon assembleDebug --stacktrace
+            echo "VARIANT=debug" >> "$GITHUB_ENV"
+          fi
+
+      - name: Verify APKs exist
+        working-directory: ${{ steps.locate.outputs.dir }}
+        shell: bash
+        run: |
+          ls -lh app/build/outputs/apk/$VARIANT/*.apk || { echo "::error::No APK was produced"; exit 1; }
+
+      - name: Give the APKs nice names
+        working-directory: ${{ steps.locate.outputs.dir }}
+        shell: bash
+        run: |
+          set -e
+          mkdir -p dist
+          for f in app/build/outputs/apk/$VARIANT/app-*-$VARIANT.apk; do
+            abi="$(basename "$f" | sed -e 's/^app-//' -e "s/-$VARIANT\.apk\$//")"
+            cp "$f" "dist/AHD-Hub-build${{ github.run_number }}-${abi}.apk"
+          done
+          ls -lh dist
+
+      # The Release below is the real delivery. The artifact is only a bonus: if GitHub's free artifact
+      # storage is full, this step may fail without failing the build.
+      - name: Upload APKs (workflow artifact)
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: AHD-Hub-debug-apks
+          path: ${{ steps.locate.outputs.dir }}/dist/*.apk
+          if-no-files-found: error
+
+      # Every successful build is also published as a GitHub Release (Releases tab).
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # With repository variable UPDATE_REPO (owner/repo) and secret RELEASE_TOKEN set, the release is created
+          # in that PUBLIC repo (the source repo can stay private). Otherwise it goes to this repo.
+          repository: ${{ vars.UPDATE_REPO || github.repository }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          tag_name: build-${{ github.run_number }}
+          target_commitish: ${{ vars.UPDATE_REPO == '' && github.sha || '' }}
+          name: AHD Hub v1.${{ github.run_number }}
+          body: ""
+          files: ${{ steps.locate.outputs.dir }}/dist/*.apk
+          fail_on_unmatched_files: true
+          make_latest: true
+
+      - name: Upload test and build reports on failure
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            ${{ steps.locate.outputs.dir }}/app/build/reports
+            ${{ steps.locate.outputs.dir }}/app/build/test-results
+          if-no-files-found: ignore
+          
