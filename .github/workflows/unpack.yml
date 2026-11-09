@@ -2,7 +2,7 @@ name: Unpack project ZIP
 
 # Phone-friendly: upload the project .zip to the repository root, then run this workflow once
 # (Actions > Unpack project ZIP > Run workflow). It replaces the project files with the ZIP's contents,
-# keeps .github/ and the history, and removes the zip. Then run "Build AHD Hub APK".
+# keeps .github/, docs/ (screenshots), LICENSE, README.md and the history, and removes the zip. Then run "Build AHD Hub APK".
 on:
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
           src="$(dirname "$found")"
           # Workflow files can't be changed by this job: keep the repository's own .github folder.
           rm -rf "$src/.github"
-          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github ! -name "$zip_file" -exec rm -rf {} +
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name .github ! -name docs ! -name LICENSE ! -name README.md ! -name "$zip_file" -exec rm -rf {} +
           cp -a "$src"/. .
           rm -f "$zip_file"
 
@@ -42,3 +42,10 @@ jobs:
           if git diff --cached --quiet; then echo "Nothing changed."; exit 0; fi
           git commit -m "Update source"
           git push
+
+
+
+
+
+
+
