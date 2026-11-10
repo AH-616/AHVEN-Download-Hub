@@ -3,6 +3,12 @@ name: Build AHD Hub APK
 on:
   push:
     branches: [ main, master ]
+    # Changing only the README, screenshots or license does not start a build (and does not raise the version).
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '**.md'
   workflow_dispatch:
 
 permissions:
@@ -153,4 +159,10 @@ jobs:
             ${{ steps.locate.outputs.dir }}/app/build/reports
             ${{ steps.locate.outputs.dir }}/app/build/test-results
           if-no-files-found: ignore
-          
+
+
+
+
+
+
+
