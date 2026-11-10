@@ -1,0 +1,13 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="download_clipboard"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_download"
+        android:shortcutShortLabel="@string/shortcut_short"
+        android:shortcutLongLabel="@string/shortcut_long">
+        <intent
+            android:action="com.aven.downloader.action.CLIPBOARD"
+            android:targetPackage="com.ahven.downloader"
+            android:targetClass="com.aven.downloader.ui.quick.QuickDownloadActivity" />
+    </shortcut>
+</shortcuts>
