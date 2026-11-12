@@ -91,18 +91,19 @@ jobs:
         working-directory: ${{ steps.locate.outputs.dir }}
         run: ./gradlew --no-daemon testDebugUnitTest --stacktrace
 
-      # Repository variable USE_R8 = true (Settings > Secrets and variables > Actions > Variables) builds the
-      # shrunk + obfuscated release APK. Anything else builds the plain debug APK.
+      # Default: the shrunk + obfuscated release APK (R8), which is much smaller.
+      # Set the repository variable USE_R8 = false (Settings > Secrets and variables > Actions > Variables)
+      # to build the plain debug APK instead (useful if a release build ever crashes at start).
       - name: Build APKs
         working-directory: ${{ steps.locate.outputs.dir }}
         shell: bash
         run: |
-          if [ "${{ vars.USE_R8 }}" = "true" ]; then
-            ./gradlew --no-daemon assembleRelease --stacktrace
-            echo "VARIANT=release" >> "$GITHUB_ENV"
-          else
+          if [ "${{ vars.USE_R8 }}" = "false" ]; then
             ./gradlew --no-daemon assembleDebug --stacktrace
             echo "VARIANT=debug" >> "$GITHUB_ENV"
+          else
+            ./gradlew --no-daemon assembleRelease --stacktrace
+            echo "VARIANT=release" >> "$GITHUB_ENV"
           fi
 
       - name: Verify APKs exist
@@ -147,7 +148,10 @@ jobs:
           body: ""
           files: ${{ steps.locate.outputs.dir }}/dist/*.apk
           fail_on_unmatched_files: true
-          make_latest: true
+          # Test first: this is a PRE-release, so the app's update check (releases/latest) does not see it.
+          # After testing on your phone: edit the release on GitHub, untick "pre-release", tick "Set as the latest release".
+          prerelease: true
+          make_latest: false
 
       - name: Upload test and build reports on failure
         if: failure()
