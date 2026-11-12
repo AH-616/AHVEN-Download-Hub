@@ -15,6 +15,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import com.aven.downloader.download.DownloadManager
+import com.aven.downloader.ui.theme.Gold
+import com.aven.downloader.ui.theme.GlassCard
 import com.aven.downloader.ui.theme.GoldSoft
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,7 +84,7 @@ import com.aven.downloader.ui.theme.SuccessGreen
 import com.aven.downloader.util.Formatters
 
 @Composable
-fun DownloadsScreen(padding: PaddingValues, vm: DownloadsViewModel = viewModel()) {
+fun DownloadsScreen(padding: PaddingValues, onOpenBrowser: () -> Unit = {}, vm: DownloadsViewModel = viewModel()) {
     val items by vm.items.collectAsStateWithLifecycle()
     val summary by vm.summary.collectAsStateWithLifecycle()
     val frags by vm.frags.collectAsStateWithLifecycle()
@@ -102,14 +104,13 @@ fun DownloadsScreen(padding: PaddingValues, vm: DownloadsViewModel = viewModel()
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp)
         )
-        TabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.background, contentColor = Gold) {
+        TabRow(selectedTabIndex = tab, containerColor = Color.Transparent, contentColor = Gold) {
             Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Queue (${active.size})") })
             Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("History (${history.size})") })
         }
         summary.blocked?.let {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            GlassCard(
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
             ) { Text(it, modifier = Modifier.padding(12.dp)) }
         }
         if (list.isEmpty()) {
@@ -132,6 +133,12 @@ fun DownloadsScreen(padding: PaddingValues, vm: DownloadsViewModel = viewModel()
                         onResume = { vm.resume(e.id) },
                         onCancel = { vm.cancel(e.id) },
                         onRetry = { vm.retry(e.id) },
+                        onRedownload = { vm.redownload(e.id) },
+                        onRefreshLink = {
+                            com.aven.downloader.ui.browser.BrowserHolder.refreshTarget = e.id
+                            com.aven.downloader.ui.browser.BrowserHolder.requestLoad(e.url)
+                            onOpenBrowser()
+                        },
                         onDetails = { detailsFor = e },
                         onRemove = { removeFor = e }
                     )
@@ -182,19 +189,20 @@ private fun DownloadCard(
     onResume: () -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
+    onRedownload: () -> Unit,
+    onRefreshLink: () -> Unit,
     onDetails: () -> Unit,
     onRemove: () -> Unit
 ) {
     val context = LocalContext.current
     val expandable = e.status == DownloadStatus.RUNNING || e.status == DownloadStatus.PAUSED || e.status == DownloadStatus.QUEUED
     var expanded by rememberSaveable(e.id) { mutableStateOf(false) }
-    Card(
+    GlassCard(
         modifier = when {
             e.status == DownloadStatus.COMPLETED -> Modifier.clickable { openWith(context, e) }
             expandable -> Modifier.clickable { expanded = !expanded }
             else -> Modifier
         },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -252,6 +260,10 @@ private fun DownloadCard(
                     }
                     DownloadStatus.FAILED -> {
                         TextButton(onClick = onRetry) { Icon(Icons.Filled.Refresh, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Retry") }
+                        TextButton(onClick = onRedownload) { Text("Redownload") }
+                        if (e.fileSource.startsWith("direct:") || e.fileSource.startsWith("ytdlp:")) {
+                            TextButton(onClick = onRefreshLink) { Text("Refresh link in browser") }
+                        }
                         TextButton(onClick = onDetails) { Icon(Icons.Filled.Info, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Details") }
                         TextButton(onClick = onRemove) { Icon(Icons.Filled.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Remove") }
                     }

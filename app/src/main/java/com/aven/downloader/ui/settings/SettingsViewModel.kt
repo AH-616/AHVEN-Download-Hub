@@ -76,6 +76,41 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setAutoDetectClipboard(v: Boolean) = viewModelScope.launch { repo.setAutoDetectClipboard(v) }
     fun setForceIpv4(v: Boolean) = viewModelScope.launch { repo.setForceIpv4(v) }
 
+    fun setDohMode(v: String) = viewModelScope.launch { repo.setDohMode(v) }
+    fun setDohCustom(v: String) = viewModelScope.launch { repo.setDohCustom(v) }
+    fun setBlockAds(v: Boolean) = viewModelScope.launch { repo.setBlockAds(v) }
+    fun setShowDownloadEditor(v: Boolean) = viewModelScope.launch { repo.setShowDownloadEditor(v) }
+    fun setThemeMode(v: String) = viewModelScope.launch { repo.setThemeMode(v) }
+
+    var cacheText by mutableStateOf("")
+        private set
+
+    private fun cacheDirs() = listOfNotNull(aven.cacheDir, aven.externalCacheDir)
+
+    fun refreshCacheSize() {
+        viewModelScope.launch {
+            val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { cacheDirs().sumOf { d -> d.walkTopDown().filter { it.isFile }.sumOf { it.length() } } }
+            cacheText = com.aven.downloader.util.Formatters.bytes(n)
+        }
+    }
+
+    /** Deletes temporary files only: never the partial data of unfinished downloads and never finished files. */
+    fun clearCache(browser: Boolean) {
+        viewModelScope.launch {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                cacheDirs().forEach { d -> d.listFiles()?.forEach { runCatching { it.deleteRecursively() } } }
+                runCatching {
+                    val il = coil.Coil.imageLoader(aven)
+                    il.memoryCache?.clear(); il.diskCache?.clear()
+                }
+            }
+            aven.engine.clearCache()
+            if (browser) com.aven.downloader.ui.browser.BrowserHolder.clearBrowsingData()
+            else com.aven.downloader.ui.browser.BrowserHolder.clearCache()
+            refreshCacheSize()
+        }
+    }
+
     fun clearCompleted() = viewModelScope.launch { aven.downloads.clearCompleted() }
     fun clearFailed() = viewModelScope.launch { aven.downloads.clearFailed() }
 

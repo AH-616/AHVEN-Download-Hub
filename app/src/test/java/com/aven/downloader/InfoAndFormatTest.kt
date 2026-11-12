@@ -49,7 +49,7 @@ class InfoAndFormatTest {
     }
 
     @Test fun audioOptionsAvailable() {
-        assertEquals(listOf("mp3", "m4a"), FormatPlanner.audioOptions(dash).map { it.audioFormat })
+        assertEquals(listOf("m4a"), FormatPlanner.audioOptions(dash).map { it.audioFormat })
     }
 
     @Test fun defaultPick() {
@@ -62,26 +62,26 @@ class InfoAndFormatTest {
     }
 
     @Test fun videoArgs() {
-        val args = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 720, "mp4", "mp3", "720p"))
+        // the own downloader picks the streams; yt-dlp is only the fallback and gets a single plain selector (no FFmpeg flags)
+        val args = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 720, "mp4", "m4a", "720p"))
         val map = args.associate { it.option to it.value }
-        assertEquals("bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", map["-f"])
-        assertEquals("mp4", map["--merge-output-format"])
-        assertEquals("res,vcodec:h264,acodec:m4a", map["-S"])
+        assertEquals("b[height<=720]/b[height<=720]/b/w", map["-f"])
+        assertFalse(map.containsKey("--merge-output-format"))
+        assertFalse(map.containsKey("-S"))
         assertTrue(map.containsKey("--no-playlist"))
     }
 
-    @Test fun mkvDoesNotForceCodecs() {
-        val args = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 0, "mkv", "mp3", "Best"))
-        assertFalse(args.any { it.option == "-S" })
-        assertEquals("bv*+ba/b", args.first { it.option == "-f" }.value)
+    @Test fun bestVideoArgs() {
+        val args = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 0, "mp4", "m4a", "Best"))
+        assertEquals("b/b/w", args.first { it.option == "-f" }.value)
     }
 
     @Test fun audioArgs() {
-        val mp3 = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.AUDIO, 0, "mp4", "mp3", "MP3")).associate { it.option to it.value }
-        assertEquals("mp3", mp3["--audio-format"])
-        assertTrue(mp3.containsKey("-x"))
         val m4a = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.AUDIO, 0, "mp4", "m4a", "M4A")).associate { it.option to it.value }
         assertEquals("ba[ext=m4a]/ba/b", m4a["-f"])
+        assertFalse(m4a.containsKey("-x"))
+        val opus = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.AUDIO, 0, "mp4", "opus", "Opus")).associate { it.option to it.value }
+        assertEquals("ba[ext=webm]/ba/b", opus["-f"])
     }
 
     // ---- preview ----

@@ -25,5 +25,6 @@ class DownloadsViewModel(application: Application) : AndroidViewModel(applicatio
     fun resume(id: Long) = viewModelScope.launch { manager.resume(id) }
     fun cancel(id: Long) = viewModelScope.launch { manager.cancel(id) }
     fun retry(id: Long) = viewModelScope.launch { manager.retry(id) }
+    fun redownload(id: Long) = viewModelScope.launch { manager.redownload(id) }
     fun remove(id: Long, deleteFile: Boolean) = viewModelScope.launch { manager.remove(id, deleteFile) }
 }

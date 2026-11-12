@@ -3,8 +3,8 @@ package com.aven.downloader.engine
 import android.app.Application
 import com.aven.downloader.AvenApp
 import com.aven.downloader.data.Settings
+import com.aven.downloader.net.Net
 import com.aven.downloader.util.UrlParser
-import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.CancellationException
@@ -29,7 +29,10 @@ sealed interface EngineState {
 
 class EngineNotReadyException(message: String) : Exception(message)
 
-/** Thin wrapper around youtubedl-android (yt-dlp + Python + FFmpeg). */
+/**
+ * Reads links. YouTube goes through NewPipe Extractor (fast, no Python); everything else through yt-dlp,
+ * which is only asked for the stream links. Plain file links are probed directly.
+ */
 class Engine(private val app: Application) {
     private val _state = MutableStateFlow<EngineState>(EngineState.Initializing)
     val state: StateFlow<EngineState> = _state
@@ -37,7 +40,7 @@ class Engine(private val app: Application) {
     /** The YouTube "player client" that worked last time is tried first next time. */
     @Volatile private var lastGoodClient = "default"
 
-    /** Extracts the bundled Python/yt-dlp/FFmpeg on first launch. Takes a few seconds. */
+    /** Extracts the bundled Python/yt-dlp on first launch. Takes a few seconds. (YouTube does not wait for it.) */
     fun start(scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) { initialize() }
     }
@@ -50,7 +53,6 @@ class Engine(private val app: Application) {
     private suspend fun initialize() {
         try {
             YoutubeDL.init(app)
-            FFmpeg.init(app)
         } catch (t: Throwable) {
             _state.value = EngineState.Failed(t.message ?: t.javaClass.simpleName)
             return
@@ -107,6 +109,8 @@ class Engine(private val app: Application) {
     private class Cached(val at: Long, val value: Fetched)
     private val cache = LinkedHashMap<String, Cached>()
 
+    fun clearCache() = synchronized(cache) { cache.clear() }
+
     private fun cacheGet(key: String): Fetched? = synchronized(cache) {
         val c = cache[key] ?: return null
         if (System.currentTimeMillis() - c.at > CACHE_MS) { cache.remove(key); null } else c.value
@@ -118,20 +122,65 @@ class Engine(private val app: Application) {
     }
 
     private suspend fun fetchUncached(url: String, forcePlaylist: Boolean): Fetched {
+        // 1) YouTube through NewPipe: about a second, no yt-dlp start-up. Any problem -> yt-dlp below.
+        if (UrlParser.isYoutube(url)) {
+            if (!forcePlaylist && UrlParser.isYoutubeSingleVideo(url)) {
+                try { return Fetched.Single(YouTubeFast.fetchVideo(url)) } catch (ce: CancellationException) { throw ce } catch (t: Throwable) { }
+            } else {
+                val target = if (forcePlaylist) (UrlParser.playlistUrlOf(url) ?: url) else url
+                if (UrlParser.isPlaylistPage(target) || forcePlaylist) {
+                    try {
+                        val pl = YouTubeFast.fetchPlaylist(target)
+                        if (pl.entries.size == 1 && !forcePlaylist) return Fetched.Single(fetchInfo(pl.entries[0].url))
+                        return Fetched.Playlist(pl)
+                    } catch (ce: CancellationException) { throw ce } catch (t: Throwable) { }
+                }
+            }
+        }
+        // 2) A link straight to a file (zip, pdf, mp4, mp3 ...): no yt-dlp needed.
+        if (!UrlParser.isYoutube(url) && !UrlParser.isDrive(url) && DirectFiles.looksLikeFile(url)) {
+            directFile(url)?.let { return it }
+        }
+
         awaitReady()
-        if (!forcePlaylist && UrlParser.isYoutubeSingleVideo(url)) return Fetched.Single(fetchInfo(url))
+        if (!forcePlaylist && UrlParser.isYoutubeSingleVideo(url)) return Fetched.Single(InfoParser.parse(url, runInfo(url, playlist = false)))
         if (UrlParser.isDrive(url)) {
             if (UrlParser.isDriveFolder(url)) return fetchDriveFolder(url)
             driveFile(url)?.let { return it }   // null = let yt-dlp try (streaming formats of a video)
         }
 
         val target = if (forcePlaylist) (UrlParser.playlistUrlOf(url) ?: url) else url
-        val out = runInfo(target, playlist = true)
+        val out = try {
+            runInfo(target, playlist = true)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            // yt-dlp doesn't know this site: it may still be a plain file with an odd link (no extension).
+            if (!UrlParser.isYoutube(url) && "unsupported url" in (t.message ?: "").lowercase()) directFile(url)?.let { return it }
+            throw t
+        }
         if (!InfoParser.isPlaylist(out)) return Fetched.Single(InfoParser.parse(url, out))
         val playlist = InfoParser.parsePlaylist(target, out)
         if (playlist.entries.isEmpty()) throw IllegalArgumentException("No videos were found at this link.")
         if (playlist.entries.size == 1 && !forcePlaylist) return Fetched.Single(fetchInfo(playlist.entries[0].url))
         return Fetched.Playlist(playlist)
+    }
+
+    /** A file link: size, type and name come from the server. Null when the link is a web page. */
+    private suspend fun directFile(url: String): Fetched.File? = withContext(Dispatchers.IO) {
+        try {
+            val p = Net.probe(url, emptyMap())
+            if (p.mime.startsWith("text/html") || p.mime == "application/xhtml+xml") return@withContext null
+            val ext = DirectFiles.extOf(p.fileName).ifEmpty { DirectFiles.extOf(url) }
+            val video = p.mime.startsWith("video/") || ext in DirectFiles.videoExtensions
+            val label = (if (video) "Original video" else "Original file") + (if (ext.isNotEmpty() && ext.length <= 5) " · ${ext.uppercase()}" else "")
+            val src = DirectSource(p.finalUrl, p.fileName, referer = "", ua = Net.DESKTOP_UA)
+            Fetched.File(FileInfo(url, p.fileName, p.mime.ifEmpty { null }, video, listOf(FileChoice(label, "direct:" + src.encode(), p.size.coerceAtLeast(0L)))))
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            null
+        }
     }
 
     // ------------------------------------------------------------------
@@ -198,6 +247,9 @@ class Engine(private val app: Application) {
 
     /** One video, with its full format list. Cancelling the coroutine stops the process. */
     suspend fun fetchInfo(url: String): MediaInfo {
+        if (UrlParser.isYoutubeSingleVideo(url)) {
+            try { return YouTubeFast.fetchVideo(url) } catch (ce: CancellationException) { throw ce } catch (t: Throwable) { }
+        }
         awaitReady()
         return InfoParser.parse(url, runInfo(url, playlist = false))
     }

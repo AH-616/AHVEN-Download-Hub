@@ -1,6 +1,6 @@
 <resources>
     <color name="aven_navy">#0B0F1A</color>
-    <color name="ahd_launcher_bg">#121519</color>
+    <color name="ahd_launcher_bg">#0E1526</color>
     <color name="aven_gold">#D4AF37</color>
     <style name="Theme.Aven" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/aven_navy</item>

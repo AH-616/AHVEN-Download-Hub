@@ -33,10 +33,10 @@ class PlaylistAndAudioTest {
     }
 
     @Test fun estimatesOnlySelected() {
-        val c = PlaylistEstimator.choices.first { it.label == "Audio MP3" }
+        val c = PlaylistEstimator.choices.first { it.label == "Audio M4A" }
         val e = listOf(PlaylistEntry("u1", "a", 100, null, null), PlaylistEntry("u2", "b", 0, null, null))
         val t = PlaylistEstimator.total(e, c)
-        assertEquals(100L * 245 * 1000 / 8, t.bytes)
+        assertEquals(100L * 130 * 1000 / 8, t.bytes)
         assertEquals(1, t.unknownCount)
     }
 
@@ -89,9 +89,11 @@ class PlaylistAndAudioTest {
         assertEquals(154_000_000L, FormatPlanner.videoOptions(estInfo, "mkv").first().estimatedSize)
     }
 
-    @Test fun mp3EstimateFollowsDuration() {
-        val mp3 = FormatPlanner.audioOptions(estInfo).first { it.audioFormat == "mp3" }
-        assertEquals(100L * 245 * 1000 / 8, mp3.estimatedSize)
+    @Test fun audioEstimatesUseTheRealStreams() {
+        val opts = FormatPlanner.audioOptions(estInfo).associate { it.audioFormat to it.estimatedSize }
+        assertEquals(3_000_000L, opts["m4a"])
+        assertEquals(4_000_000L, opts["opus"])
+        assertFalse(opts.containsKey("mp3"))
     }
 
     // ---- speed ----

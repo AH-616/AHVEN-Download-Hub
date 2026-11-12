@@ -20,8 +20,8 @@ enum class DuplicateMode(val label: String) {
 
 data class Settings(
     val defaultQuality: Int = 0,               // 0 = best, otherwise max height
-    val videoContainer: String = "mp4",        // mp4 | mkv
-    val audioFormat: String = "mp3",           // mp3 | m4a
+    val videoContainer: String = "mp4",        // mp4 (kept for old installs; the file type now follows the codec: MP4 or WebM)
+    val audioFormat: String = "m4a",           // m4a | opus
     val preferAudio: Boolean = false,          // which tab opens first on the format screen
     val customFolderUri: String? = null,       // null = Download/AHD Hub
     val wifiOnly: Boolean = false,
@@ -33,7 +33,12 @@ data class Settings(
     val forceIpv4: Boolean = true,             // helps with some YouTube 403/429 cases
     val lastUpdateCheck: Long = 0L,
     val parts: Int = 4,                        // 1..16 parallel parts of one download
-    val autoDetectClipboard: Boolean = true    // read a copied link when the app opens
+    val autoDetectClipboard: Boolean = true,   // read a copied link when the app opens
+    val dohMode: String = "off",               // off | cloudflare | google | adguard | custom
+    val dohCustom: String = "",                // https://... DNS-over-HTTPS address (custom mode)
+    val blockAds: Boolean = true,              // in-app browser: block known ad / tracker hosts
+    val showDownloadEditor: Boolean = true,    // IDM-style "file info" window before a browser download
+    val themeMode: String = "system"           // system | light | dark
 ) {
     /** How many segments / connections of one download run at the same time. */
     val fragments: Int get() = parts.coerceIn(1, 16)
@@ -56,13 +61,18 @@ class SettingsRepository(private val context: Context) {
         val lastUpdate = longPreferencesKey("last_update_check")
         val parts = intPreferencesKey("parts")
         val clip = booleanPreferencesKey("auto_clipboard")
+        val doh = stringPreferencesKey("doh_mode")
+        val dohCustom = stringPreferencesKey("doh_custom")
+        val blockAds = booleanPreferencesKey("block_ads")
+        val editor = booleanPreferencesKey("download_editor")
+        val theme = stringPreferencesKey("theme_mode")
     }
 
     val flow: Flow<Settings> = context.dataStore.data.map { p ->
         Settings(
             defaultQuality = p[K.quality] ?: 0,
-            videoContainer = p[K.container] ?: "mp4",
-            audioFormat = p[K.audio] ?: "mp3",
+            videoContainer = "mp4",   // MKV (needs FFmpeg) is gone; old saved value ignored
+            audioFormat = (p[K.audio] ?: "m4a").let { if (it == "opus") "opus" else "m4a" },
             preferAudio = p[K.preferAudio] ?: false,
             customFolderUri = p[K.folder],
             wifiOnly = p[K.wifiOnly] ?: false,
@@ -75,7 +85,12 @@ class SettingsRepository(private val context: Context) {
             forceIpv4 = p[K.ipv4] ?: true,
             lastUpdateCheck = p[K.lastUpdate] ?: 0L,
             parts = (p[K.parts] ?: 4).coerceIn(1, 16),
-            autoDetectClipboard = p[K.clip] ?: true
+            autoDetectClipboard = p[K.clip] ?: true,
+            dohMode = p[K.doh] ?: "off",
+            dohCustom = p[K.dohCustom] ?: "",
+            blockAds = p[K.blockAds] ?: true,
+            showDownloadEditor = p[K.editor] ?: true,
+            themeMode = p[K.theme] ?: "system"
         )
     }
 
@@ -98,4 +113,9 @@ class SettingsRepository(private val context: Context) {
     suspend fun setParts(v: Int) = edit { it[K.parts] = v.coerceIn(1, 16) }
     suspend fun setAutoDetectClipboard(v: Boolean) = edit { it[K.clip] = v }
     suspend fun setLastUpdateCheck(v: Long) = edit { it[K.lastUpdate] = v }
+    suspend fun setDohMode(v: String) = edit { it[K.doh] = v }
+    suspend fun setDohCustom(v: String) = edit { it[K.dohCustom] = v.trim() }
+    suspend fun setBlockAds(v: Boolean) = edit { it[K.blockAds] = v }
+    suspend fun setShowDownloadEditor(v: Boolean) = edit { it[K.editor] = v }
+    suspend fun setThemeMode(v: String) = edit { it[K.theme] = v }
 }

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aven.downloader.engine.EngineState
 import com.aven.downloader.ui.theme.Gold
+import com.aven.downloader.ui.theme.GlassCard
 
 @Composable
 fun HomeScreen(vm: HomeViewModel, padding: PaddingValues) {
@@ -129,7 +130,7 @@ fun HomeScreen(vm: HomeViewModel, padding: PaddingValues) {
             else -> Unit
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        GlassCard(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Tips", fontWeight = FontWeight.SemiBold, color = Gold)
                 Text("• In any app, tap Share and choose AHD Hub: a small popup opens, pick quality and download. Or copy a link and use the \"Download link\" Quick Settings tile.", style = MaterialTheme.typography.bodyMedium)
@@ -150,7 +151,7 @@ private fun StatusCard(
     action: String? = null,
     onAction: () -> Unit = {}
 ) {
-    Card(
+    GlassCard(
         colors = CardDefaults.cardColors(
             containerColor = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant
         )
@@ -166,7 +167,7 @@ private fun StatusCard(
 @Composable
 private fun ErrorCard(message: String, details: String?) {
     var showDetails by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+    GlassCard(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
             if (!details.isNullOrBlank() && details != message) {

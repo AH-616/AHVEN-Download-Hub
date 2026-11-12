@@ -11,6 +11,10 @@ import com.aven.downloader.engine.Engine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import com.aven.downloader.net.Net
 
 /** Application class doubles as a tiny service locator (no DI framework needed). */
 class AvenApp : Application() {
@@ -30,7 +34,11 @@ class AvenApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        engine.start(appScope)   // unpack yt-dlp / Python / FFmpeg in the background
+        // DNS over HTTPS follows the setting (also applied once at start).
+        appScope.launch {
+            settings.flow.map { it.dohMode to it.dohCustom }.distinctUntilChanged().collect { (m, c) -> Net.configure(m, c) }
+        }
+        engine.start(appScope)   // unpack yt-dlp / Python in the background
         downloads                // create the manager so queued items are picked up after restart
     }
 

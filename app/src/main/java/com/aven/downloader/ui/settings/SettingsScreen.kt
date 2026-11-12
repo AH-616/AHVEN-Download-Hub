@@ -40,6 +40,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,8 +60,10 @@ import com.aven.downloader.ui.CookieLoginActivity
 import com.aven.downloader.data.DuplicateMode
 import com.aven.downloader.engine.EngineState
 import com.aven.downloader.ui.theme.Gold
+import com.aven.downloader.ui.theme.GlassCard
+import androidx.compose.material3.OutlinedTextField
 
-private enum class Dialog { QUALITY, CONTAINER, AUDIO, DUPLICATE, CLEAR_COMPLETED, CLEAR_FAILED, FOLDER, CHANNEL, CLEAR_COOKIES }
+private enum class Dialog { QUALITY, CONTAINER, AUDIO, DUPLICATE, CLEAR_COMPLETED, CLEAR_FAILED, FOLDER, CHANNEL, CLEAR_COOKIES, DOH, THEME, CLEAR_CACHE, DOH_CUSTOM }
 
 @Composable
 fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel = viewModel()) {
@@ -103,10 +106,13 @@ fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel = viewModel()) 
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp, start = 4.dp))
 
+        Section("Appearance") {
+            ValueRow("Theme", when (s.themeMode) { "light" -> "Light"; "dark" -> "Dark"; else -> "System" }, "Liquid-glass look in dark or light.") { dialog = Dialog.THEME }
+        }
+
         Section("Quality & format") {
             ValueRow("Default video quality", qualityLabel(s.defaultQuality), "Used to pre-select a quality; falls back to the closest available.") { dialog = Dialog.QUALITY }
-            ValueRow("Video format", s.videoContainer.uppercase(), "MP4 is the most compatible. MKV keeps the best codecs.") { dialog = Dialog.CONTAINER }
-            ValueRow("Audio format", s.audioFormat.uppercase(), "Used when you download audio only.") { dialog = Dialog.AUDIO }
+            ValueRow("Audio format", if (s.audioFormat == "opus") "OPUS (WebM)" else "M4A", "Used when you download audio only. (MP3 needs FFmpeg, which was removed to keep the app small and fast.)") { dialog = Dialog.AUDIO }
             SwitchRow("Open on Audio tab", "Start the format screen on Audio instead of Video.", s.preferAudio) { vm.setPreferAudio(it) }
         }
 
@@ -116,6 +122,24 @@ fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel = viewModel()) 
             } ?: "Downloads/AHD Hub"
             ValueRow("Save location", folderName, "Finished files are saved here. Partial downloads stay in app storage until done.") { dialog = Dialog.FOLDER }
             ValueRow("If a file already exists", s.duplicateMode.label, null) { dialog = Dialog.DUPLICATE }
+        }
+
+        Section("Browser") {
+            SwitchRow("Block ads", "Blocks known ad, pop-up and tracker hosts in the in-app browser.", s.blockAds) { vm.setBlockAds(it) }
+            SwitchRow("Download editor", "Show the \"Download file info\" window (name, size, folder, connections) before a browser download. Off = starts at once.", s.showDownloadEditor) { vm.setShowDownloadEditor(it) }
+        }
+
+        Section("DNS over HTTPS") {
+            ValueRow(
+                "Secure DNS", when (s.dohMode) { "cloudflare" -> "Cloudflare 1.1.1.1"; "google" -> "Google 8.8.8.8"; "adguard" -> "AdGuard"; "custom" -> "Custom"; else -> "Off" },
+                "Encrypts the app's own lookups (downloads, YouTube fetch, probes). The in-app web pages and yt-dlp still use the system DNS."
+            ) { dialog = Dialog.DOH }
+            if (s.dohMode == "custom") ValueRow("Custom DoH address", s.dohCustom.ifBlank { "Not set" }, "e.g. https://dns.example.com/dns-query") { dialog = Dialog.DOH_CUSTOM }
+        }
+
+        Section("Data management") {
+            LaunchedEffect(Unit) { vm.refreshCacheSize() }
+            ValueRow("Clear cache", vm.cacheText, "Deletes temporary files, image and browser cache. Your downloads and unfinished downloads are kept.") { dialog = Dialog.CLEAR_CACHE }
         }
 
         Section("Network & queue") {
@@ -217,9 +241,26 @@ fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel = viewModel()) 
             }
         }
 
-        var aboutOpen by rememberSaveable { mutableStateOf(false) }
         val updateUi by AvenApp.instance.updater.state.collectAsStateWithLifecycle()
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Section("App update") {
+            Text("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = { AvenApp.instance.updater.check(true) },
+                    enabled = updateUi !is UpdateUi.Checking
+                ) { Text("Check for updates") }
+                if (updateUi is UpdateUi.Checking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 3.dp)
+            }
+            when (val u = updateUi) {
+                UpdateUi.UpToDate -> Text("You have the latest version.", color = Gold)
+                UpdateUi.NotConfigured -> Text("Updates are not set up in this build.", color = Gold)
+                is UpdateUi.Failed -> { if (u.info == null) Text(u.message, color = Gold) }
+                else -> Unit
+            }
+        }
+
+        var aboutOpen by rememberSaveable { mutableStateOf(false) }
+        GlassCard(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     Modifier.fillMaxWidth().clickable { aboutOpen = !aboutOpen },
@@ -229,22 +270,8 @@ fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel = viewModel()) 
                     Icon(if (aboutOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
                 }
                 if (aboutOpen) {
-                    Text("AHVEN Download Hub uses yt-dlp and FFmpeg (via youtubedl-android) and is released under GPL-3.0. Download only content you're allowed to save.", style = MaterialTheme.typography.bodySmall)
+                    Text("AHVEN Download Hub uses NewPipe Extractor and yt-dlp (via youtubedl-android) and is released under GPL-3.0. Download only content you're allowed to save.", style = MaterialTheme.typography.bodySmall)
                     Text("Made by AH", fontWeight = FontWeight.SemiBold)
-                    Text("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(
-                            onClick = { AvenApp.instance.updater.check(true) },
-                            enabled = updateUi !is UpdateUi.Checking
-                        ) { Text("Check for updates") }
-                        if (updateUi is UpdateUi.Checking) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 3.dp)
-                    }
-                    when (val u = updateUi) {
-                        UpdateUi.UpToDate -> Text("You have the latest version.", color = Gold)
-                        UpdateUi.NotConfigured -> Text("Updates are not set up in this build.", color = Gold)
-                        is UpdateUi.Failed -> if (u.info == null) Text(u.message, color = Gold)
-                        else -> Unit
-                    }
                     Text(
                         "Contact: ahvenstudio@gmail.com",
                         color = Gold,
@@ -270,12 +297,40 @@ fun SettingsScreen(padding: PaddingValues, vm: SettingsViewModel = viewModel()) 
             listOf(0 to "Best available", 1080 to "1080p", 720 to "720p", 480 to "480p", 360 to "360p"),
             s.defaultQuality, { vm.setQuality(it) }, { dialog = null }
         )
-        Dialog.CONTAINER -> ChoiceDialog(
-            "Video format", listOf("mp4" to "MP4 (most compatible)", "mkv" to "MKV (best codecs)"),
-            s.videoContainer, { vm.setContainer(it) }, { dialog = null }
+        Dialog.CONTAINER -> dialog = null
+        Dialog.THEME -> ChoiceDialog(
+            "Theme", listOf("system" to "Follow system", "light" to "Light", "dark" to "Dark"),
+            s.themeMode, { vm.setThemeMode(it) }, { dialog = null }
+        )
+        Dialog.DOH -> ChoiceDialog(
+            "DNS over HTTPS",
+            listOf("off" to "Off (system DNS)", "cloudflare" to "Cloudflare (1.1.1.1)", "google" to "Google (8.8.8.8)", "adguard" to "AdGuard", "custom" to "Custom…"),
+            s.dohMode, { vm.setDohMode(it); if (it == "custom") dialog = Dialog.DOH_CUSTOM }, { if (dialog == Dialog.DOH) dialog = null }
+        )
+        Dialog.DOH_CUSTOM -> {
+            var text by remember { mutableStateOf(s.dohCustom) }
+            AlertDialog(
+                onDismissRequest = { dialog = null },
+                title = { Text("Custom DoH address") },
+                text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, placeholder = { Text("https://dns.example.com/dns-query") }) },
+                confirmButton = { TextButton(onClick = { vm.setDohCustom(text); dialog = null }) { Text("Save") } },
+                dismissButton = { TextButton(onClick = { dialog = null }) { Text("Cancel") } }
+            )
+        }
+        Dialog.CLEAR_CACHE -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Clear cache?") },
+            text = { Text("Deletes temporary files, image cache and browser cache. Downloads and unfinished downloads are not touched.") },
+            confirmButton = { TextButton(onClick = { vm.clearCache(false); dialog = null }) { Text("Clear cache") } },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { vm.clearCache(true); dialog = null }) { Text("Also logins & history") }
+                    TextButton(onClick = { dialog = null }) { Text("Cancel") }
+                }
+            }
         )
         Dialog.AUDIO -> ChoiceDialog(
-            "Audio format", listOf("mp3" to "MP3 (converted)", "m4a" to "M4A (original quality)"),
+            "Audio format", listOf("m4a" to "M4A (original quality)", "opus" to "Opus (WebM audio)"),
             s.audioFormat, { vm.setAudioFormat(it) }, { dialog = null }
         )
         Dialog.DUPLICATE -> ChoiceDialog(
@@ -321,7 +376,7 @@ private fun versionDate(v: String): String? {
 
 @Composable
 private fun HalfCard(title: String, modifier: Modifier, content: @Composable () -> Unit) {
-    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    GlassCard(modifier = modifier) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, color = Gold, fontWeight = FontWeight.SemiBold)
             content()
@@ -331,7 +386,7 @@ private fun HalfCard(title: String, modifier: Modifier, content: @Composable () 
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, color = Gold, fontWeight = FontWeight.SemiBold)
             content()

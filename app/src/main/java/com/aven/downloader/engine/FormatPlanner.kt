@@ -6,8 +6,8 @@ enum class DownloadKind { VIDEO, AUDIO, FILE }
 data class DownloadSpec(
     val kind: DownloadKind,
     val heightCap: Int,          // video only; 0 = best available
-    val container: String,       // "mp4" or "mkv"
-    val audioFormat: String,     // "mp3" or "m4a"
+    val container: String,       // "mp4" (H.264/AAC preferred; the real file type follows the codecs: MP4 or WebM)
+    val audioFormat: String,     // "m4a" or "opus" (old downloads may still say "mp3": treated as m4a)
     val label: String,
     val audioLang: String = "",  // "" = default/original audio track, else yt-dlp language tag (e.g. "hi")
     val pinned: String = "",     // exact yt-dlp format ids the size estimate was made for, e.g. "137+140" ("" = none)
@@ -45,20 +45,24 @@ object FormatPlanner {
     }
 
     fun audioOptions(info: MediaInfo): List<AudioOption> {
-        val hasAudio = info.formats.any { it.hasAudio }
-        if (!hasAudio) return emptyList()
         val dur = info.durationSec
-        // MP3 is re-encoded at the best VBR quality (about 245 kbps), so its size depends on the length,
-        // not on the size of the source stream.
-        val mp3 = if (dur > 0) dur.toLong() * MP3_KBPS * 1000L / 8L else bestAudio(info.formats)?.let { sizeOf(it, dur) } ?: 0L
-        val m4aSource = info.formats.filter { it.hasAudio && !it.hasVideo && isM4a(it) }
-            .maxByOrNull { sizeOf(it, dur) }
+        val audioOnly = info.formats.filter { it.hasAudio && !it.hasVideo }
+        val out = mutableListOf<AudioOption>()
+        if (audioOnly.isEmpty()) {
+            // A site that only offers finished videos: the sound is cut out of the smallest one (no re-encoding).
+            val muxed = info.formats.filter { it.hasAudio && it.hasVideo && it.url != null }
+                .minByOrNull { if (it.height > 0) it.height else Int.MAX_VALUE } ?: return emptyList()
+            out += AudioOption("M4A (sound of the video)", "m4a", sizeOf(muxed, dur))
+            return out
+        }
+        val m4aSource = audioOnly.filter { isM4a(it) }.maxByOrNull { sizeOf(it, dur) }
         val m4a = m4aSource?.let { sizeOf(it, dur) }
             ?: if (dur > 0) dur.toLong() * M4A_KBPS * 1000L / 8L else bestAudio(info.formats)?.let { sizeOf(it, dur) } ?: 0L
-        return listOf(
-            AudioOption("MP3 (converted)", "mp3", mp3),
-            AudioOption("M4A (original quality)", "m4a", m4a)
-        )
+        if (m4aSource != null || audioOnly.none { !isM4a(it) }) out += AudioOption("M4A (original quality)", "m4a", m4a)
+        val opusSource = audioOnly.filter { !isM4a(it) }.maxByOrNull { sizeOf(it, dur) }
+        if (opusSource != null) out += AudioOption("Opus (WebM audio)", "opus", sizeOf(opusSource, dur))
+        if (out.isEmpty()) out += AudioOption("Audio (original quality)", "m4a", m4a)
+        return out
     }
 
     /**
@@ -88,6 +92,8 @@ object FormatPlanner {
     }
 
     /**
+     * yt-dlp arguments for the fallback path (links the own downloader can't handle: HLS/DASH-only sites).
+     * FFmpeg is not bundled, so only formats that are one finished file (or an HLS stream) are asked for.
      * @param fragments how many pieces of a segmented (HLS/DASH) video download at the same time.
      * @param chunked download in 10 MB pieces, which avoids YouTube slowing down one long connection.
      */
@@ -97,31 +103,19 @@ object FormatPlanner {
             DownloadKind.VIDEO -> {
                 val h = spec.heightCap
                 val hv = if (h > 0) "[height<=$h]" else ""
-                val core = if (spec.audioLang.isNotEmpty()) {
-                    val l = "[language^=${langKey(spec.audioLang)}]"
-                    "bv*$hv+ba$l/bv*$hv+ba/b$hv/bv*+ba/b"
-                } else if (h > 0) "bv*[height<=$h]+ba/b[height<=$h]/bv*+ba/b" else "bv*+ba/b"
-                // The exact streams that were measured for the size estimate come first; the general
-                // selector is only the fallback if those ids are no longer offered at download time.
-                val pin = spec.pinned.filter { it.isLetterOrDigit() || it == '+' || it == '-' || it == '_' || it == '.' }
-                val selector = if (pin.isNotEmpty() && spec.audioLang.isEmpty()) "$pin/$core" else core
+                val l = if (spec.audioLang.isNotEmpty()) "[language^=${langKey(spec.audioLang)}]" else ""
+                val selector = if (h > 0) "b$hv$l/b$hv/b/w" else "b$l/b/w"
                 args += Arg("-f", selector)
-                args += Arg("--merge-output-format", spec.container)
-                // MP4: prefer H.264 + AAC so every player can open the file. MKV: keep best codecs.
-                if (spec.container == "mp4") args += Arg("-S", "res,vcodec:h264,acodec:m4a")
             }
             DownloadKind.FILE -> return emptyList()   // plain files are downloaded by our own downloader
             DownloadKind.AUDIO -> {
                 val l = if (spec.audioLang.isNotEmpty()) "[language^=${langKey(spec.audioLang)}]" else ""
-                val sel = if (spec.audioFormat == "m4a") {
-                    if (l.isEmpty()) "ba[ext=m4a]/ba/b" else "ba[ext=m4a]$l/ba$l/ba[ext=m4a]/ba/b"
+                val sel = if (spec.audioFormat == "opus") {
+                    if (l.isEmpty()) "ba[ext=webm]/ba/b" else "ba[ext=webm]$l/ba$l/ba[ext=webm]/ba/b"
                 } else {
-                    if (l.isEmpty()) "ba/b" else "ba$l/ba/b"
+                    if (l.isEmpty()) "ba[ext=m4a]/ba/b" else "ba[ext=m4a]$l/ba$l/ba[ext=m4a]/ba/b"
                 }
                 args += Arg("-f", sel)
-                args += Arg("-x")
-                args += Arg("--audio-format", spec.audioFormat)
-                args += Arg("--audio-quality", "0")
             }
         }
         args += Arg("--no-playlist")
@@ -135,17 +129,13 @@ object FormatPlanner {
         return args
     }
 
-    private const val MP3_KBPS = 245   // yt-dlp --audio-quality 0 = LAME V0, about 220-260 kbps
     private const val M4A_KBPS = 130
 
     // ---- helpers ----
 
-    /** "en-US" -> "en" so it also matches "en-GB"; keeps only safe characters for the selector. */
-    private fun langKey(lang: String): String = lang.substringBefore('-').filter { it.isLetterOrDigit() }
-
     /**
-     * Estimates the size of the file that will really be downloaded: the same video/audio stream that
-     * [buildArgs] makes yt-dlp pick (MP4: H.264 + M4A; MKV: newest codec), not the biggest one on offer.
+     * Estimates the size of the file that will really be downloaded: the same video/audio stream the own
+     * downloader picks at download time (H.264 + M4A first; VP9 + Opus where there is no H.264), not the biggest one on offer.
      */
     internal data class Pick(val size: Long, val pinned: String)
 
@@ -154,13 +144,38 @@ object FormatPlanner {
         val v = chooseVideo(info.formats.filter { it.hasVideo && it.height == height }, container, dur) ?: return Pick(0, "")
         var total = sizeOf(v, dur)
         if (v.hasAudio) return Pick(total, v.id)
-        val a = chooseAudio(info.formats, container, dur)
+        val a = chooseAudio(info.formats, v, "")
         total += a?.let { sizeOf(it, dur) } ?: 0L
         return Pick(total, if (a != null) "${v.id}+${a.id}" else v.id)
     }
 
+    /**
+     * The video (and the separate audio stream it needs) that a download of [heightCap] ([container] "mp4") uses.
+     * [heightCap] 0 = best. Used by the own downloader at download time.
+     */
+    internal fun chooseStreams(info: MediaInfo, heightCap: Int, container: String, lang: String): Pair<StreamFormat, StreamFormat?>? {
+        val withVideo = info.formats.filter { it.hasVideo }
+        if (withVideo.isEmpty()) return null
+        val heights = withVideo.map { it.height }.filter { it > 0 }.distinct().sortedDescending()
+        val v = if (heights.isEmpty()) {
+            withVideo.maxByOrNull { it.tbr }
+        } else {
+            val h = if (heightCap <= 0) heights.first() else (heights.firstOrNull { it <= heightCap } ?: heights.last())
+            chooseVideo(withVideo.filter { it.height == h }, container, info.durationSec)
+        } ?: return null
+        if (v.hasAudio) return v to null
+        return v to chooseAudio(info.formats, v, lang)
+    }
+
     private fun isH264(vcodec: String?) = vcodec != null && (vcodec.startsWith("avc") || vcodec.startsWith("h264"))
-    private fun isM4a(f: StreamFormat) = f.ext == "m4a" || (f.acodec?.startsWith("mp4a") == true && f.ext != "webm")
+    internal fun isM4a(f: StreamFormat) = f.ext == "m4a" || (f.acodec?.startsWith("mp4a") == true && f.ext != "webm")
+
+    /** Codecs the platform MP4 muxer takes on every supported Android version. */
+    internal fun isMp4Video(vcodec: String?): Boolean = vcodec != null &&
+        (isH264(vcodec) || vcodec.startsWith("hev") || vcodec.startsWith("hvc") || vcodec.startsWith("h265") || vcodec.startsWith("mp4v"))
+
+    /** "en-US" -> "en" so it also matches "en-GB"; keeps only safe characters for the selector. */
+    private fun langKey(lang: String): String = lang.substringBefore('-').filter { it.isLetterOrDigit() }
 
     /** Lower = preferred by yt-dlp's default sort for MKV (av1 > vp9 > h265 > h264). */
     private fun codecRank(vcodec: String?): Int = when {
@@ -172,11 +187,20 @@ object FormatPlanner {
         else -> 4
     }
 
+    /** Lower = preferred for a file that must play everywhere: H.264, H.265, VP9 (WebM), AV1 last. */
+    private fun playRank(vcodec: String?): Int = when {
+        isH264(vcodec) -> 0
+        vcodec != null && (vcodec.startsWith("hev") || vcodec.startsWith("hvc") || vcodec.startsWith("h265")) -> 1
+        vcodec != null && (vcodec.startsWith("vp9") || vcodec.startsWith("vp09")) -> 2
+        vcodec != null && (vcodec.startsWith("av01") || vcodec.startsWith("av1")) -> 4
+        else -> 3
+    }
+
     internal fun chooseVideo(candidates: List<StreamFormat>, container: String, durationSec: Int): StreamFormat? {
         if (candidates.isEmpty()) return null
         return if (container == "mp4") {
-            val h264 = candidates.filter { isH264(it.vcodec) }
-            (if (h264.isEmpty()) candidates else h264).maxByOrNull { sizeOf(it, durationSec) }
+            val best = candidates.minOf { playRank(it.vcodec) }
+            candidates.filter { playRank(it.vcodec) == best }.maxByOrNull { sizeOf(it, durationSec) }
         } else {
             candidates.sortedWith(
                 compareBy<StreamFormat> { codecRank(it.vcodec) }.thenByDescending { sizeOf(it, durationSec) }
@@ -184,17 +208,28 @@ object FormatPlanner {
         }
     }
 
-    internal fun chooseAudio(formats: List<StreamFormat>, container: String, durationSec: Int): StreamFormat? {
-        val audio = formats.filter { it.hasAudio && !it.hasVideo }
+    /**
+     * The audio stream that goes with [video]: AAC (M4A) for H.264/H.265 video (MP4 file), Opus (WebM) for VP9/AV1.
+     * [lang] "" = the original track when the video has several languages.
+     */
+    internal fun chooseAudio(formats: List<StreamFormat>, video: StreamFormat?, lang: String, preferOpus: Boolean = false): StreamFormat? {
+        var audio = formats.filter { it.hasAudio && !it.hasVideo }
         if (audio.isEmpty()) return null
-        val pool = if (container == "mp4") audio.filter { isM4a(it) }.ifEmpty { audio } else audio
+        val langs = audio.mapNotNull { it.language }.map { langKey(it) }.distinct()
+        if (lang.isNotEmpty()) {
+            audio.filter { it.language?.let { l -> langKey(l) == langKey(lang) } == true }.takeIf { it.isNotEmpty() }?.let { audio = it }
+        } else if (langs.size > 1) {
+            audio.filter { val n = it.note.orEmpty().lowercase(); "default" in n || "original" in n }.takeIf { it.isNotEmpty() }?.let { audio = it }
+        }
+        val wantM4a = if (preferOpus) false else video == null || isMp4Video(video.vcodec)
+        val pool = (if (wantM4a) audio.filter { isM4a(it) } else audio.filter { !isM4a(it) }).ifEmpty { audio }
         return pool.maxByOrNull { if (it.abr > 0) it.abr else it.tbr }
     }
 
     private fun bestAudio(formats: List<StreamFormat>): StreamFormat? =
         formats.filter { it.hasAudio && !it.hasVideo }.maxByOrNull { if (it.abr > 0) it.abr else it.tbr }
 
-    private fun sizeOf(f: StreamFormat, durationSec: Int): Long {
+    internal fun sizeOf(f: StreamFormat, durationSec: Int): Long {
         if (f.fileSize > 0) return f.fileSize
         if (f.tbr > 0 && durationSec > 0) return (f.tbr * 1000 / 8 * durationSec).toLong()
         return 0

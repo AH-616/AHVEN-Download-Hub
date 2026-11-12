@@ -56,6 +56,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // NewPipe Extractor uses newer java.* APIs than API 26 has.
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "17"
@@ -85,7 +87,8 @@ android {
         resources {
             excludes += setOf(
                 "META-INF/DEPENDENCIES", "META-INF/LICENSE", "META-INF/LICENSE.txt",
-                "META-INF/NOTICE", "META-INF/NOTICE.txt", "META-INF/AL2.0", "META-INF/LGPL2.1"
+                "META-INF/NOTICE", "META-INF/NOTICE.txt", "META-INF/AL2.0", "META-INF/LGPL2.1",
+                "META-INF/INDEX.LIST"
             )
         }
     }
@@ -118,9 +121,15 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
 
-    // yt-dlp + FFmpeg for Android (Maven Central, verified against the 0.18.1 source)
+    // YouTube: NewPipe Extractor (pure Java, fast). Other sites: yt-dlp (Python) only as the link reader.
+    // FFmpeg is NOT bundled any more: video + audio are merged with Android's own MediaMuxer (smaller app).
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+
+    // Network: one OkHttp client for everything the app downloads itself, with optional DNS over HTTPS.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

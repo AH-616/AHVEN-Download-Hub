@@ -55,11 +55,10 @@ class DriveAndPinTest {
         val opts = FormatPlanner.videoOptions(info, "mp4")
         val p720 = opts.first { it.height == 720 }
         assertEquals("136+140", p720.pinned)
-        val args = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 720, "mp4", "mp3", "720p", pinned = p720.pinned))
+        // the fallback yt-dlp selector no longer needs the pin (the own downloader re-plans with the same rules)
+        val args = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 720, "mp4", "m4a", "720p", pinned = p720.pinned))
             .associate { it.option to it.value }
-        assertTrue(args["-f"]!!.startsWith("136+140/"))
-        val noPin = FormatPlanner.buildArgs(DownloadSpec(DownloadKind.VIDEO, 720, "mp4", "mp3", "720p")).associate { it.option to it.value }
-        assertTrue(noPin["-f"]!!.startsWith("bv*"))
+        assertTrue(args["-f"]!!.startsWith("b[height<=720]"))
     }
 
     @Test fun knownHostsForClipboard() {

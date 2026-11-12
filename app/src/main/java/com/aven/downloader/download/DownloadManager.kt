@@ -17,6 +17,11 @@ import com.aven.downloader.engine.MediaInfo
 import com.aven.downloader.engine.PlaylistEntry
 import com.aven.downloader.engine.DownloadSpec
 import com.aven.downloader.engine.DownloadKind
+import com.aven.downloader.engine.DirectPlanner
+import com.aven.downloader.engine.DirectSource
+import com.aven.downloader.engine.Fetched
+import com.aven.downloader.engine.StreamFormat
+import com.aven.downloader.net.Net
 import com.aven.downloader.engine.DriveFiles
 import com.aven.downloader.engine.FileChoice
 import com.aven.downloader.engine.FileInfo
@@ -161,6 +166,27 @@ class DownloadManager(
         return id
     }
 
+    /**
+     * A file or HLS stream found by the in-app browser (or typed in as a direct link).
+     * [hls] true = a .m3u8 stream: yt-dlp downloads it; otherwise the own multi-connection downloader does.
+     */
+    suspend fun enqueueDirect(src: DirectSource, pageUrl: String, hls: Boolean, sizeHint: Long = 0L): Long {
+        val label = if (hls) "Stream (HLS)" else "File"
+        val id = dao.insert(
+            DownloadEntity(
+                url = pageUrl.ifBlank { src.url },
+                title = src.name.ifBlank { Net.fileNameFrom(null, src.url) },
+                kind = DownloadKind.FILE,
+                formatLabel = label,
+                fileSource = (if (hls) "ytdlp:" else "direct:") + src.encode(),
+                totalBytes = sizeHint
+            )
+        )
+        DownloadService.ensureRunning(app)
+        kick()
+        return id
+    }
+
     /** Adds many playlist videos at once, all with the same quality choice. @return how many were added. */
     suspend fun enqueueAll(entries: List<PlaylistEntry>, spec: DownloadSpec): Int {
         for (en in entries) {
@@ -226,6 +252,31 @@ class DownloadManager(
             DownloadStatus.CANCELED -> dao.restart(id, System.currentTimeMillis())
             else -> return
         }
+        DownloadService.ensureRunning(app)
+        kick()
+    }
+
+    /** IDM "Redownload": forget partial data and start the file again from zero. */
+    suspend fun redownload(id: Long) {
+        val e = dao.get(id) ?: return
+        if (e.status != DownloadStatus.FAILED && e.status != DownloadStatus.CANCELED) return
+        tmpDir(id).deleteRecursively()
+        dao.restart(id, System.currentTimeMillis())
+        DownloadService.ensureRunning(app)
+        kick()
+    }
+
+    /** IDM "Refresh link": the browser found a fresh address for the same file; keep the partial data and continue. */
+    suspend fun replaceLink(id: Long, src: DirectSource, hls: Boolean) {
+        val e = dao.get(id) ?: return
+        val old = e.fileSource
+        // keep the name chosen earlier
+        val named = if (old.startsWith("direct:") || old.startsWith("ytdlp:")) {
+            val o = runCatching { DirectSource.decode(old.substringAfter(':')) }.getOrNull()
+            if (o != null && o.name.isNotBlank()) src.copy(name = o.name) else src
+        } else src
+        dao.setSource(id, (if (hls) "ytdlp:" else "direct:") + named.encode())
+        dao.requeue(id)
         DownloadService.ensureRunning(app)
         kick()
     }
@@ -359,12 +410,18 @@ class DownloadManager(
         try {
             if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
             tmp.mkdirs()
-            engine.awaitReady()
             val settings = settingsRepo.flow.first()
 
             val fileSource = fileSourceOf(e)
             var plainFile = fileSource != null
-            if (fileSource != null) {
+            if (fileSource != null && fileSource.startsWith("ytdlp:")) {
+                // An HLS stream found in the browser: yt-dlp downloads it with the page's headers.
+                engine.awaitReady()
+                val ds = DirectSource.decode(fileSource.removePrefix("ytdlp:"))
+                val spec = DownloadSpec(DownloadKind.VIDEO, 0, "mp4", "m4a", "Stream (HLS)", "", "", "")
+                plainFile = false
+                runYtDlp(id, ds.url, spec, tmp, live, settings, ds.headers())
+            } else if (fileSource != null) {
                 try {
                     downloadFile(id, fileSource, tmp, live, settings)
                 } catch (t: Throwable) {
@@ -378,11 +435,23 @@ class DownloadManager(
                     tmp.deleteRecursively(); tmp.mkdirs()
                     live.percent = 0f; live.total = 0; live.speed = 0
                     live.detail = "Trying another way…"
-                    val spec = e.toSpec().copy(kind = DownloadKind.VIDEO, heightCap = 0, container = settings.videoContainer, pinned = "", fileSource = "")
+                    engine.awaitReady()
+                    val spec = e.toSpec().copy(kind = DownloadKind.VIDEO, heightCap = 0, container = "mp4", pinned = "", fileSource = "")
                     runYtDlp(id, e.url, spec, tmp, live, settings)
                 }
             } else {
-                runYtDlp(id, e.url, e.toSpec(), tmp, live, settings)
+                // First choice: our own downloader (many connections, merge with Android's muxer). yt-dlp is the fallback.
+                val own = downloadOwn(id, e, tmp, live, settings)
+                if (own) {
+                    plainFile = true
+                } else {
+                    live.seg = null
+                    tmp.deleteRecursively(); tmp.mkdirs()
+                    live.percent = 0f; live.total = 0; live.speed = 0; live.streamIndex = 0; live.streamCount = 1
+                    live.detail = "Starting…"
+                    engine.awaitReady()
+                    runYtDlp(id, e.url, e.toSpec(), tmp, live, settings)
+                }
             }
 
             ticker.cancelAndJoin()
@@ -422,7 +491,10 @@ class DownloadManager(
         }
     }
 
-    private suspend fun runYtDlp(id: Long, url: String, spec: DownloadSpec, tmp: File, live: Live, settings: Settings) {
+    private suspend fun runYtDlp(
+        id: Long, url: String, spec: DownloadSpec, tmp: File, live: Live, settings: Settings,
+        extraHeaders: Map<String, String> = emptyMap()
+    ) {
         var attempt = 0
         engine.withClients(url) { client ->
             if (attempt++ > 0) {
@@ -442,6 +514,7 @@ class DownloadManager(
                 if (a.value == null) request.addOption(a.option) else request.addOption(a.option, a.value)
             }
             request.addOption("-o", "${tmp.absolutePath}/%(title).100B.%(ext)s")
+            extraHeaders.forEach { (k, v) -> request.addOption("--add-header", "$k:$v") }
             val cookieCopy = engine.configure(request, settings, client)
             try {
                 YoutubeDL.execute(request, id.toString(), false) { _, eta, line ->
@@ -503,6 +576,7 @@ class DownloadManager(
         val name: String
         val size: Long
         val ranges: Boolean
+        var partsOverride = 0
         live.detail = "Preparing…"
         when (parts[0]) {
             "drive" -> {
@@ -517,10 +591,27 @@ class DownloadManager(
                 url = DriveFiles.exportUrl(parts[1], parts[2], parts[3]); size = 0L; ranges = false
                 if (cookie != null) headers["Cookie"] = cookie
             }
+            "direct" -> {
+                val ds = DirectSource.decode(source.substringAfter("direct:"))
+                headers.clear()
+                headers.putAll(ds.headers())
+                if (headers.keys.none { it.equals("User-Agent", true) }) headers["User-Agent"] = Net.DESKTOP_UA
+                val p = withContext(Dispatchers.IO) { Net.probe(ds.url, headers) }
+                url = p.finalUrl
+                name = ds.name.ifBlank { p.fileName }
+                size = p.size.coerceAtLeast(0L)
+                ranges = p.ranges
+                partsOverride = ds.parts
+            }
             else -> throw IOException("DL: Unknown file source.")
         }
         if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
-        val seg = SegmentedDownloader(url, headers, File(tmp, safeName(name)), size, ranges, settings.fragments)
+        val seg = SegmentedDownloader(url, headers, File(tmp, safeName(name)), size, ranges, if (partsOverride > 0) partsOverride else settings.fragments)
+        runSegmented(id, seg, live, size)
+    }
+
+    /** Runs one segmented download and keeps cancel/pause working. */
+    private suspend fun runSegmented(id: Long, seg: SegmentedDownloader, live: Live, size: Long) {
         live.seg = seg
         live.total = size
         live.detail = if (seg.workers > 1) "Downloading · ${seg.workers} parts" else "Downloading"
@@ -537,6 +628,91 @@ class DownloadManager(
         }
         live.seg?.snapshot()?.let { live.total = it.total }
         live.seg = null
+    }
+
+    /**
+     * Own downloader for video/audio: picks the streams, downloads each with many connections and merges
+     * them with Android's MediaMuxer (no FFmpeg). @return false when yt-dlp should do it instead.
+     */
+    private suspend fun downloadOwn(id: Long, e: DownloadEntity, tmp: File, live: Live, settings: Settings): Boolean {
+        if (e.kind == DownloadKind.FILE) return false
+        val spec = e.toSpec()
+        live.detail = "Reading the link…"
+        val fetched = try {
+            engine.fetch(e.url)
+        } catch (c: CancellationException) {
+            if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
+            throw c
+        } catch (t: Throwable) {
+            return false
+        }
+        val info = (fetched as? Fetched.Single)?.info ?: return false
+        val plan = DirectPlanner.plan(info, spec) ?: return false
+        if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
+
+        try {
+            val base = safeName(e.title).take(100).trim().ifBlank { "download" }
+            val cancelled = { stopRequests.containsKey(id) }
+            val twoStreams = plan.video != null && plan.audio != null
+            live.streamCount = if (twoStreams) 2 else 1
+            val vFile = File(tmp, if (twoStreams) "$base.v.part" else if (plan.extractAudio) "$base.src.part" else "$base.${plan.ext}")
+            val aFile = File(tmp, if (plan.video == null) "$base.${plan.ext}" else "$base.a.part")
+
+            if (plan.video != null) {
+                live.streamIndex = 1
+                downloadStream(id, plan.video, vFile, live, settings,
+                    if (twoStreams) "Downloading video (1 of 2)" else null)
+            }
+            if (plan.audio != null) {
+                live.streamIndex = if (twoStreams) 2 else 1
+                downloadStream(id, plan.audio, aFile, live, settings,
+                    if (twoStreams) "Downloading audio (2 of 2)" else null)
+            }
+
+            if (twoStreams) {
+                live.seg = null
+                live.detail = "Merging video and audio…"
+                live.speed = 0; live.eta = 0; live.percent = 0f
+                val out = File(tmp, "$base.${plan.ext}")
+                withContext(Dispatchers.IO) {
+                    Muxer.merge(vFile, aFile, out, plan.webm, { live.percent = it * 100f }, cancelled)
+                }
+                vFile.delete(); aFile.delete()
+                File(vFile.path + ".blocks").delete(); File(aFile.path + ".blocks").delete()
+            } else if (plan.extractAudio) {
+                live.seg = null
+                live.detail = "Extracting the sound…"
+                live.speed = 0; live.eta = 0
+                val webm = Muxer.audioMime(vFile)?.let { !it.contains("mp4a") && !it.contains("aac") } ?: false
+                val out = File(tmp, "$base.${if (webm) "weba" else "m4a"}")
+                withContext(Dispatchers.IO) { Muxer.extractAudio(vFile, out, webm, cancelled) }
+                vFile.delete()
+                File(vFile.path + ".blocks").delete()
+            }
+            return true
+        } catch (c: CancellationException) {
+            if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
+            throw c
+        } catch (c: YoutubeDL.CanceledException) {
+            throw c
+        } catch (t: Throwable) {
+            // Server refused (403 / 429), merge not possible on this phone ... -> let yt-dlp try the old way.
+            if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
+            return false
+        }
+    }
+
+    private suspend fun downloadStream(id: Long, f: StreamFormat, dest: File, live: Live, settings: Settings, detail: String?) {
+        val headers = HashMap(f.headers)
+        if (headers.keys.none { it.equals("User-Agent", true) }) headers["User-Agent"] = Net.DESKTOP_UA
+        live.detail = "Preparing…"
+        val url = f.url ?: throw IOException("No link for this stream")
+        val p = withContext(Dispatchers.IO) { Net.probe(url, headers) }
+        if (stopRequests.containsKey(id)) throw YoutubeDL.CanceledException()
+        val size = p.size.coerceAtLeast(0L)
+        val seg = SegmentedDownloader(p.finalUrl, headers, dest, size, p.ranges, settings.fragments)
+        runSegmented(id, seg, live, size)
+        if (detail != null) live.detail = detail
     }
 
     private suspend fun fail(id: Long, title: String, raw: String?) {

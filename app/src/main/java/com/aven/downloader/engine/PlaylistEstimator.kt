@@ -10,12 +10,11 @@ object PlaylistEstimator {
     data class Choice(val label: String, val kind: DownloadKind, val heightCap: Int, val audioFormat: String, val kbps: Int)
 
     val choices: List<Choice> = listOf(
-        Choice("Best available", DownloadKind.VIDEO, 0, "mp3", 2800),
-        Choice("1080p", DownloadKind.VIDEO, 1080, "mp3", 2600),
-        Choice("720p", DownloadKind.VIDEO, 720, "mp3", 1400),
-        Choice("480p", DownloadKind.VIDEO, 480, "mp3", 800),
-        Choice("360p", DownloadKind.VIDEO, 360, "mp3", 450),
-        Choice("Audio MP3", DownloadKind.AUDIO, 0, "mp3", 245),
+        Choice("Best available", DownloadKind.VIDEO, 0, "m4a", 2800),
+        Choice("1080p", DownloadKind.VIDEO, 1080, "m4a", 2600),
+        Choice("720p", DownloadKind.VIDEO, 720, "m4a", 1400),
+        Choice("480p", DownloadKind.VIDEO, 480, "m4a", 800),
+        Choice("360p", DownloadKind.VIDEO, 360, "m4a", 450),
         Choice("Audio M4A", DownloadKind.AUDIO, 0, "m4a", 130)
     )
 

@@ -48,6 +48,9 @@ interface DownloadDao {
     @Query("UPDATE downloads SET status = 'QUEUED', progress = 0, totalBytes = 0, errorSummary = NULL, errorDetails = NULL, statusDetail = NULL, createdAt = :now WHERE id = :id")
     suspend fun restart(id: Long, now: Long)
 
+    @Query("UPDATE downloads SET fileSource = :source WHERE id = :id")
+    suspend fun setSource(id: Long, source: String)
+
     @Query("UPDATE downloads SET status = 'PAUSED', statusDetail = 'Interrupted — tap resume', speedBps = 0, etaSec = 0 WHERE status = 'RUNNING'")
     suspend fun markRunningInterrupted()
 

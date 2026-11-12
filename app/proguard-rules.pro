@@ -26,3 +26,28 @@
 -dontwarn org.brotli.**
 -dontwarn org.objectweb.asm.**
 -dontwarn javax.annotation.**
+
+# NewPipe Extractor (YouTube lookup): uses reflection-free code, but its helpers have optional classes.
+-keep class org.schabi.newpipe.extractor.** { *; }
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.** { *; }
+-keep class com.grack.nanojson.** { *; }
+-keep class org.jsoup.** { *; }
+-dontwarn org.mozilla.javascript.JavaToJSONConverters
+-dontwarn org.mozilla.javascript.tools.**
+-dontwarn java.beans.**
+-dontwarn javax.script.**
+-dontwarn jdk.dynalink.**
+-dontwarn com.google.re2j.**
+-dontwarn org.jspecify.**
+-dontwarn com.google.errorprone.**
+
+# OkHttp / Okio / DNS over HTTPS
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+
+# In-app browser: methods the page's JavaScript calls
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-keep class com.aven.downloader.ui.browser.BrowserHolder$Bridge { *; }

@@ -35,6 +35,12 @@ class MainActivity : ComponentActivity() {
         )
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
+            val dark = com.aven.downloader.ui.theme.rememberDarkTheme()
+            androidx.compose.runtime.DisposableEffect(dark) {
+                val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                onDispose { }
+            }
             AvenTheme {
                 PermissionRequests()
                 AvenRoot()

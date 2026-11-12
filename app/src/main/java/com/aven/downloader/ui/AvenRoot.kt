@@ -34,6 +34,32 @@ import com.aven.downloader.ui.home.HomeViewModel
 import com.aven.downloader.ui.preview.PreviewScreen
 import com.aven.downloader.ui.settings.SettingsScreen
 import com.aven.downloader.ui.theme.Gold
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.mutableStateOf
+import com.aven.downloader.ui.browser.BrowserScreen
+import com.aven.downloader.ui.browser.GrabberScreen
+import com.aven.downloader.ui.theme.GlassBackground
+import com.aven.downloader.ui.theme.ThemeState
+import com.aven.downloader.ui.theme.glassBorder
 
 @Composable
 fun AvenRoot() {
@@ -49,7 +75,7 @@ fun AvenRoot() {
     // A link arrived from the Share menu / deep link / another app.
     LaunchedEffect(event) {
         val e = event ?: return@LaunchedEffect
-        if (e.openDownloads) tab = 1
+        if (e.openDownloads) tab = 2
         if (!e.text.isNullOrBlank()) {
             tab = 0
             home.submit(e.text)
@@ -76,34 +102,74 @@ fun AvenRoot() {
             settings = settings,
             onBack = home::dismissPreview,
             onRefresh = home::refreshPreview,
-            onDownload = { spec -> home.download(spec) { tab = 1 } }
+            onDownload = { spec -> home.download(spec) { tab = 2 } }
         )
         return
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                val colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                    selectedTextColor = Gold,
-                    indicatorColor = Gold
+    var grabber by rememberSaveable { mutableStateOf(false) }
+    if (grabber) {
+        GrabberScreen(onBack = { grabber = false }, onDownloads = { grabber = false; tab = 2 })
+        return
+    }
+
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val padding = PaddingValues(top = topInset, bottom = bottomInset + 84.dp)
+
+    GlassBackground {
+        Box(Modifier.fillMaxSize()) {
+            when (tab) {
+                0 -> HomeScreen(home, padding)
+                1 -> BrowserScreen(
+                    padding = padding,
+                    onSupportedVideo = { u -> tab = 0; home.submit(u) },
+                    onOpenGrabber = { grabber = true },
+                    onQueued = { tab = 2 }
                 )
-                NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, colors = colors,
-                    icon = { Icon(Icons.Filled.Home, contentDescription = null) }, label = { Text("Home") })
-                NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, colors = colors,
-                    icon = { Icon(Icons.Filled.Download, contentDescription = null) }, label = { Text("Downloads") })
-                NavigationBarItem(selected = tab == 2, onClick = { tab = 2 }, colors = colors,
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = null) }, label = { Text("Settings") })
+                2 -> DownloadsScreen(padding, onOpenBrowser = { tab = 1 })
+                else -> SettingsScreen(padding)
             }
+            GlassTabBar(
+                selected = tab,
+                onSelect = { tab = it },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomInset + 10.dp)
+            )
         }
-    ) { padding ->
-        when (tab) {
-            0 -> HomeScreen(home, padding)
-            1 -> DownloadsScreen(padding)
-            else -> SettingsScreen(padding)
+    }
+}
+
+@Composable
+private fun GlassTabBar(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val items = listOf(
+        Triple("Home", Icons.Filled.Home, 0),
+        Triple("Browser", Icons.Filled.Language, 1),
+        Triple("Downloads", Icons.Filled.Download, 2),
+        Triple("Settings", Icons.Filled.Settings, 3)
+    )
+    val shape = RoundedCornerShape(32.dp)
+    Row(
+        modifier
+            .padding(horizontal = 16.dp)
+            .clip(shape)
+            .background(if (ThemeState.dark) Color(0xCC141A2B) else Color(0xE6FFFFFF))
+            .border(glassBorder(), shape)
+            .padding(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items.forEach { (label, icon, i) ->
+            val on = selected == i
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(if (on) Gold.copy(alpha = 0.22f) else Color.Transparent)
+                    .clickable { onSelect(i) }
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(icon, contentDescription = label, tint = if (on) Gold else MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = if (on) Gold else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal)
+            }
         }
     }
 }

@@ -8,11 +8,11 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import com.aven.downloader.net.Net
+import okhttp3.Call
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicIntegerArray
@@ -44,7 +44,7 @@ class SegmentedDownloader(
     private val connBytes = AtomicLongArray(workers)
     private val connBlock = AtomicIntegerArray(workers).also { for (i in 0 until workers) it.set(i, -1) }
     private val nextBlock = AtomicInteger(0)
-    private val openConns = ConcurrentLinkedQueue<HttpURLConnection>()
+    private val openConns = ConcurrentLinkedQueue<Call>()
     private val stateFile = File(dest.path + ".blocks")
 
     private fun blockLen(i: Int): Long = minOf(blockSize, totalSize - i * blockSize)
@@ -103,7 +103,7 @@ class SegmentedDownloader(
                 }
             } else runSingle()
         } finally {
-            openConns.forEach { try { it.disconnect() } catch (ignored: Exception) { } }
+            openConns.forEach { try { it.cancel() } catch (ignored: Exception) { } }
             openConns.clear()
         }
     }
@@ -148,33 +148,38 @@ class SegmentedDownloader(
             val start = b * blockSize + blockBytes.get(b)
             val end = b * blockSize + blockLen(b) - 1
             if (start > end) return
-            val c = connect(start, end)
+            val call = newCall(start, end)
             try {
-                val code = c.responseCode
-                if (code == 429 || code == 403) throw IOException("DL: Google Drive refused the extra connections (HTTP $code). Lower \"Number of parts\" in Settings and retry.")
-                if (code == 200) throw RangeIgnored()
-                if (code != 206) throw IOException("HTTP $code")
-                c.inputStream.use { ins ->
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val n = ins.read(buf)
-                        if (n < 0) break
-                        raf.seek(b * blockSize + blockBytes.get(b))
-                        raf.write(buf, 0, n)
-                        blockBytes.addAndGet(b, n.toLong())
-                        connBytes.addAndGet(w, n.toLong())
+                call.execute().use { r ->
+                    val code = r.code
+                    if (code == 429 || code == 403) throw IOException("DL: The server refused the extra connections (HTTP $code). Lower \"Number of parts\" in Settings and retry.")
+                    if (code == 200) throw RangeIgnored()
+                    if (code != 206) throw IOException("HTTP $code")
+                    val body = r.body ?: throw IOException("Empty answer")
+                    body.byteStream().use { ins ->
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val n = ins.read(buf)
+                            if (n < 0) break
+                            raf.seek(b * blockSize + blockBytes.get(b))
+                            raf.write(buf, 0, n)
+                            blockBytes.addAndGet(b, n.toLong())
+                            connBytes.addAndGet(w, n.toLong())
+                        }
                     }
                 }
                 if (blockBytes.get(b) >= blockLen(b)) return
                 throw IOException("Connection closed early")
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: RangeIgnored) {
+                throw e
             } catch (e: IOException) {
                 if (e.message?.startsWith("DL:") == true) throw e
                 if (++attempt >= 6) throw IOException("DL: Download failed after several tries (${e.message}). Tap retry to continue.")
                 delay(attempt * 1500L)
             } finally {
-                openConns.remove(c); try { c.disconnect() } catch (ignored: Exception) { }
+                openConns.remove(call); try { call.cancel() } catch (ignored: Exception) { }
             }
         }
     }
@@ -186,19 +191,22 @@ class SegmentedDownloader(
             dest.delete()
             connBytes.set(0, 0)
             connBlock.set(0, -1)
-            val c = connect(-1, -1)
+            val call = newCall(-1, -1)
             try {
-                val code = c.responseCode
-                if (code !in 200..299) throw IOException("HTTP $code")
-                val buf = ByteArray(64 * 1024)
-                RandomAccessFile(dest, "rw").use { raf ->
-                    c.inputStream.use { ins ->
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val n = ins.read(buf)
-                            if (n < 0) break
-                            raf.write(buf, 0, n)
-                            connBytes.addAndGet(0, n.toLong())
+                call.execute().use { r ->
+                    val code = r.code
+                    if (code !in 200..299) throw IOException("HTTP $code")
+                    val body = r.body ?: throw IOException("Empty answer")
+                    val buf = ByteArray(64 * 1024)
+                    RandomAccessFile(dest, "rw").use { raf ->
+                        body.byteStream().use { ins ->
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val n = ins.read(buf)
+                                if (n < 0) break
+                                raf.write(buf, 0, n)
+                                connBytes.addAndGet(0, n.toLong())
+                            }
                         }
                     }
                 }
@@ -206,24 +214,23 @@ class SegmentedDownloader(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: IOException) {
+                if (e.message?.startsWith("DL:") == true) throw e
                 if (++attempt >= 3) throw IOException("DL: Download failed (${e.message}). Tap retry.")
                 delay(attempt * 1500L)
             } finally {
-                openConns.remove(c); try { c.disconnect() } catch (ignored: Exception) { }
+                openConns.remove(call); try { call.cancel() } catch (ignored: Exception) { }
             }
         }
     }
 
-    private fun connect(start: Long, end: Long): HttpURLConnection {
-        val c = URL(url).openConnection() as HttpURLConnection
-        c.connectTimeout = 20_000
-        c.readTimeout = 30_000
-        c.instanceFollowRedirects = true
-        c.setRequestProperty("Accept-Encoding", "identity")
-        headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
-        if (start >= 0) c.setRequestProperty("Range", "bytes=$start-$end")
-        openConns.add(c)
-        return c
+    private fun newCall(start: Long, end: Long): Call {
+        val h = HashMap(headers)
+        h["Accept-Encoding"] = "identity"
+        if (h.keys.none { it.equals("User-Agent", true) }) h["User-Agent"] = Net.DESKTOP_UA
+        val req = Net.request(url, h, if (start >= 0) "bytes=$start-$end" else null)
+        val call = Net.downloadClient.newCall(req)
+        openConns.add(call)
+        return call
     }
 
     private class RangeIgnored : IOException("server ignored range")

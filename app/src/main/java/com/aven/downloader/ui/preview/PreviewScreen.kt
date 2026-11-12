@@ -77,6 +77,7 @@ import com.aven.downloader.engine.PreviewSource
 import com.aven.downloader.engine.VideoOption
 import com.aven.downloader.ui.home.FetchState
 import com.aven.downloader.ui.theme.Gold
+import com.aven.downloader.ui.theme.GlassCard
 import com.aven.downloader.util.Formatters
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -249,14 +250,14 @@ private fun sizeText(bytes: Long) = if (bytes > 0) "~" + Formatters.bytes(bytes)
 
 @Composable
 private fun Note(text: String) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    GlassCard(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Text(text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
 private fun OptionRow(label: String, size: String, selected: Boolean, onClick: () -> Unit) {
-    Card(
+    GlassCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
