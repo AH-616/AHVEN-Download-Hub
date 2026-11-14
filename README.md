@@ -14,7 +14,7 @@ Paste a link or search YouTube, pick the quality, and download. Videos, music, p
   <a href="LICENSE"><img alt="License GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-E6B830?style=for-the-badge&labelColor=111111"></a>
 </p>
 
-[**Download the APK**](../../releases/latest) · [Features](#-features) · [Screenshots](#-screenshots) · [Build it yourself](#-build-it-yourself) · [Credits](#-credits)
+[**Download the APK**](../../releases/latest) · [Features](#-features) · [Screenshots](#-screenshots) · [Credits](#-credits)
 
 </div>
 
