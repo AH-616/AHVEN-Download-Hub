@@ -72,17 +72,6 @@ Paste a link or search YouTube, pick the quality, and download. Videos, music, p
 - **Downloads:** follow progress, pause or resume, and play or share finished files.
 - **Settings:** theme, download folder, connections, DNS over HTTPS, cookies, cache, app update.
 
-## 🛠 Build it yourself
-
-The project is a standard Gradle project (Kotlin 2.0, Jetpack Compose, Room, Media3).
-
-```bash
-git clone https://github.com/AH-616/AHVEN-Download-Hub.git
-cd AHVEN-Download-Hub
-./gradlew assembleDebug        # debug APK in app/build/outputs/apk/debug
-```
-
-Release builds are made by GitHub Actions (`.github/workflows/build.yml`). Every build is published as a **pre-release**. After testing it, promote it to *latest* on the Releases page and users receive it as an update. Signing keys live in repository secrets and are never part of the source.
 
 ## 🧱 Built with
 
