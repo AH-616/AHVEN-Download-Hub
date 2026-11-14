@@ -1,79 +1,108 @@
-<p align="center">
-  <img src="docs/logo.png" width="160" alt="AHD Hub logo">
+<div align="center">
+
+<img src="docs/logo.png" width="120" alt="AHD Hub logo" />
+
+# AHD Hub
+
+**AHVEN Download Hub: a fast, modern, open-source downloader for Android.**
+Paste a link or search YouTube, pick the quality, and download. Videos, music, playlists and plain files.
+
+<p>
+  <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/AH-616/AHVEN-Download-Hub?style=for-the-badge&color=E6B830&labelColor=111111"></a>
+  <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&labelColor=111111&logo=android&logoColor=white">
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-Compose-7F52FF?style=for-the-badge&labelColor=111111&logo=kotlin&logoColor=white">
+  <a href="LICENSE"><img alt="License GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-E6B830?style=for-the-badge&labelColor=111111"></a>
 </p>
 
-<h1 align="center">AHD Hub</h1>
-<p align="center"><b>AHVEN Download Hub</b> – a free, open-source video and file downloader for Android.<br>
-Made by AH · <a href="mailto:ahvenstudio@gmail.com">ahvenstudio@gmail.com</a></p>
+[**Download the APK**](../../releases/latest) · [Features](#-features) · [Screenshots](#-screenshots) · [Build it yourself](#-build-it-yourself) · [Credits](#-credits)
 
-<p align="center">
-  <a href="../../releases/latest"><b>⬇ Download the latest APK</b></a>
-</p>
+</div>
 
 ---
 
-## What it does
+## ✨ Features
 
-Paste or share a link, see the available qualities with an estimated size, and download in the background. It is powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp), so it works with YouTube, Facebook, Instagram, TikTok, Google Drive and 1000+ other sites.
+|  |  |
+| :-- | :-- |
+| 🔎 **Search tab** | Search YouTube right inside the app: **All · Videos · Playlists · Channels · Music**. Every result has its own download button, and playlists show a clear playlist badge with the video count. |
+| ▶️ **Built-in player** | Watch before you download. Picture and sound are merged on the fly, with **quality** and **audio-language** choice, playback speed and loop. Controls float over the video, no solid black bars. |
+| ⚡ **Fast fetch** | Link info comes from the NewPipe extractor first, so the quality list appears in a moment. yt-dlp is the fallback for the many other supported sites. |
+| 🎞️ **Choose exactly what you get** | Pick the resolution, the audio track (multi-audio videos too), subtitles, or audio only. |
+| 📃 **Playlists** | Download a whole playlist or tick only the videos you want. |
+| 🚀 **Multi-connection downloads** | Up to 16 parallel parts, pause, resume and retry. Files in the app's own folder (`Downloads/AHD Hub`). |
+| 🗂️ **Downloads manager** | **All · Downloading · Finished · Error** tabs. A ⋮ menu on every item: Play, Open, Share, Open folder, Redownload, Copy link, Copy / Move / Rename, Properties, Remove. |
+| 🎵 **Play downloads in the app** | Finished videos and music open in the same player. |
+| 🔒 **DNS over HTTPS** | Optional DoH for the app's own lookups (Cloudflare, Google, Quad9 or your own server). |
+| 🌗 **Liquid-glass design** | Modern glass-style interface with **dark and light** themes and a floating tab bar. |
+| 🔄 **In-app updates** | Update from the app itself. Releases go through a test (pre-release) step before they reach everyone. |
+| 🪶 **Small** | arm64-v8a only, R8-shrunk. No ads, no trackers, no analytics. |
 
-## Screenshots
+> The app does not download DRM-protected streams and does not bypass any site's protection.
 
-| Home | Choose quality | Share popup |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/home.png" width="220"> | <img src="docs/screenshots/quality.png" width="220"> | <img src="docs/screenshots/popup.png" width="220"> |
+## 📸 Screenshots
 
-| Downloads | Google Drive (blocks) | Settings |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/downloads.png" width="220"> | <img src="docs/screenshots/drive.png" width="220"> | <img src="docs/screenshots/settings.png" width="220"> |
+<div align="center">
 
-## Features
+| Home | Pick quality | Search |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/home.png" width="230"> | <img src="docs/screenshots/quality.png" width="230"> | <img src="docs/screenshots/search.png" width="230"> |
 
-**Downloading**
-- Video quality choice with an estimated file size (MP4 or MKV), or audio only (MP3 / M4A)
-- Choose the audio language of videos that have several audio tracks
-- Playlists: pick the videos you want, see the estimated total size
-- Share any link from another app: a small popup opens, pick the quality, and it downloads in the background
-- Paste button, and automatic reading of a copied link when the app opens (can be turned off)
-- Pause, resume, retry, open the finished file with any app
-- Wi-Fi only option, 1–5 downloads at the same time, choice of what to do when a file already exists
-- Adjustable **number of parts** (1–16) for faster downloads
+| Playlist results | Player | Downloads |
+| :---: | :---: | :---: |
+| <img src="docs/screenshots/playlist.png" width="230"> | <img src="docs/screenshots/player.png" width="230"> | <img src="docs/screenshots/downloads.png" width="230"> |
 
-**Google Drive**
-- Videos, zip files, documents and any other shared file, downloaded in several parts at once with a block-by-block view
-- Google Docs, Sheets and Slides with a choice of format (PDF, DOCX, XLSX, PPTX, CSV, TXT)
-- Optional Google login (cookies) for files that need it
+| Settings | Light theme |
+| :---: | :---: |
+| <img src="docs/screenshots/settings.png" width="230"> | <img src="docs/screenshots/light.png" width="230"> |
 
-**Organised storage**
-- Files are sorted into folders by type inside the folder you choose: Videos, Music, Photos, Documents, Compressed, Programs, Subtitles, Torrents, Others
+</div>
 
-**Notifications**
-- Progress notification with the video name, thumbnail, percentage, speed, size and time left
+## 📥 Install
 
-**Updates**
-- Built-in app updates (checked from GitHub Releases). A new version can be postponed for at most 2 days, then the update is required
-- One-tap update of the download engine (yt-dlp) in Settings
+1. Open the [latest release](../../releases/latest) and download the `.apk`.
+2. Allow "install unknown apps" for your browser or file manager when Android asks.
+3. Open **AHD Hub**. Later updates arrive from inside the app (Settings → App update).
 
-## Install
+**Requirements:** Android 8.0 (API 26) or newer, 64-bit ARM phone (arm64-v8a).
 
-1. Open the [Releases page](../../releases/latest).
-2. Download one APK:
-   - **arm64-v8a** – most phones from the last several years
-   - **armeabi-v7a** – old 32-bit phones
-   - **universal** – works on both, bigger file
-3. Open it and allow "install unknown apps" when Android asks.
+## 🧭 How to use
 
-Requires Android 8.0 (API 26) or newer.
+- **Home:** paste a link (or share a link to the app), choose the quality, tap download.
+- **Search:** type a name, pick a filter, tap a result to watch it, or tap its download icon to pick the quality straight away.
+- **Downloads:** follow progress, pause or resume, and play or share finished files.
+- **Settings:** theme, download folder, connections, DNS over HTTPS, cookies, cache, app update.
 
-## Tips
+## 🛠 Build it yourself
 
-- If YouTube shows an error, open **Settings → Update engine** first. If it still fails, try the *Nightly* update channel or log in under **Login cookies**.
-- Google Drive may block a file that was downloaded too many times (quota). Try later or lower the number of parts.
-- Files protected with DRM cannot be downloaded.
+The project is a standard Gradle project (Kotlin 2.0, Jetpack Compose, Room, Media3).
 
-## Built with
+```bash
+git clone https://github.com/AH-616/AHVEN-Download-Hub.git
+cd AHVEN-Download-Hub
+./gradlew assembleDebug        # debug APK in app/build/outputs/apk/debug
+```
 
-Kotlin · Jetpack Compose · Room · DataStore · Coil · Media3 · Coroutines · [yt-dlp](https://github.com/yt-dlp/yt-dlp) · FFmpeg · [youtubedl-android](https://github.com/yausername/youtubedl-android)
+Release builds are made by GitHub Actions (`.github/workflows/build.yml`). Every build is published as a **pre-release**. After testing it, promote it to *latest* on the Releases page and users receive it as an update. Signing keys live in repository secrets and are never part of the source.
 
-## Legal
+## 🧱 Built with
 
-AHD Hub is released under the **GNU GPL v3** (see `LICENSE`). Download only content you own or have permission to save. You are responsible for following the terms of the sites you use and your local laws. This project is not affiliated with YouTube, Google, Meta, TikTok or any other service.
+Kotlin · Jetpack Compose · Room · DataStore · Media3 ExoPlayer · OkHttp · Coil
+
+## 🙏 Credits
+
+AHD Hub stands on the shoulders of great open-source work:
+
+- [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor): fast YouTube info, search and playlists
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [youtubedl-android](https://github.com/yausername/youtubedl-android): wide site support
+- [OkHttp](https://github.com/square/okhttp), [Coil](https://github.com/coil-kt/coil), [Media3](https://github.com/androidx/media)
+
+## ⚖️ License and notice
+
+AHD Hub is free software under the **GNU GPL v3.0**, see [LICENSE](LICENSE).
+Download only content you have the right to save. You are responsible for how you use the app and for following the terms of the sites you use. This project is not affiliated with YouTube, Google or any other service.
+
+<div align="center">
+
+Made with ♥ by **AH** · Star ⭐ the repo if it helps you
+
+</div>
